@@ -40,32 +40,29 @@ func TestParse(t *testing.T) {
 	f := openFile(t, "testdata/edge")
 	b := bufio.NewReaderSize(f, 38)
 
-	header, points, err := Parse(b)
+	p, err := Parse(b)
 	if err != nil {
 		t.Fatal("cannot parse testdata/edge:", err)
 	}
 
-	expectHeader := Header{
-		Version: 1,
-		Type:    "Edge",
-		Motors:  []Motor{"v1", "v2"},
-		Delay:   100 * time.Millisecond,
-		MD5Sum:  "deadbeef",
+	expect := &Pattern{
+		Header: Header{
+			Version:  1,
+			Type:     "Edge",
+			Features: []Feature{"v1", "v2"},
+			Interval: 100 * time.Millisecond,
+			MD5Sum:   "deadbeef",
+		},
+		Points: [][]Point{
+			{0, 1}, {1, 0}, {1, 0}, {0, 1}, {20, 0}, {0, 20}, {20, 20}, {0, 0},
+			{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+			{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+			{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+		},
 	}
 
-	if diff := deep.Equal(header, expectHeader); diff != nil {
-		t.Fatalf("unexpected header: %s", diff)
-	}
-
-	expectPoints := [][]Point{
-		{0, 1}, {1, 0}, {1, 0}, {0, 1}, {20, 0}, {0, 20}, {20, 20}, {0, 0},
-		{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
-		{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
-		{0, 0}, {0, 0}, {0, 0}, {0, 0},
-	}
-
-	if diff := deep.Equal(points, expectPoints); diff != nil {
-		t.Fatalf("unexpected points: %s", diff)
+	if diff := deep.Equal(p, expect); diff != nil {
+		t.Fatalf("unexpected pattern: %s", diff)
 	}
 }
 

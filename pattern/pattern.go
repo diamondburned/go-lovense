@@ -147,6 +147,7 @@ func (r *Reader) ReadHeader() (Header, error) {
 // ReadData reads a list of motor data points. The returned list is valid until
 // the next call.
 func (r *Reader) ReadPoints() ([]Point, error) {
+	// TODO: retry until EOF or valid to skip spaces.
 	b, err := r.buf.ReadSlice(';')
 	if err != nil {
 		return nil, err
@@ -188,12 +189,13 @@ func (r *Reader) ReadAllPoints() ([][]Point, error) {
 			return nil, fmt.Errorf("cannot read: %w", err)
 		}
 
-		if len(b) == 0 || string(b) == "\n" {
-			continue
-		}
-
 		// Trim the trailing semicolon out, since ReadSlice includes it.
 		b = bytes.TrimSuffix(b, []byte(";"))
+		b = bytes.Trim(b, "\n")
+
+		if len(b) == 0 {
+			continue
+		}
 
 		// Count the stride for the first point tuple if we haven't one.
 		if stride == -1 {
