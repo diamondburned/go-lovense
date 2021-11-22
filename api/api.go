@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -61,6 +62,12 @@ func WithHeader(h http.Header) RequestOpt {
 // Client is a general API client.
 type Client struct {
 	*http.Client
+	*ClientData
+	ctx context.Context
+}
+
+// ClientData contains the shared client data.
+type ClientData struct {
 	Host          string // apps.lovense.com
 	DefaultForm   url.Values
 	DefaultHeader http.Header
@@ -68,14 +75,30 @@ type Client struct {
 
 // NewClient returns a new client.
 func NewClient() *Client {
+	return NewClientContext(context.Background())
+}
+
+// NewClientContext returns a new client with the given context applied
+// throughout the requests.
+func NewClientContext(ctx context.Context) *Client {
 	client := *http.DefaultClient
 	client.Timeout = time.Minute
 
 	return &Client{
-		Client:      &client,
-		Host:        "apps.lovense.com",
-		DefaultForm: DefaultForm,
+		Client: &client,
+		ClientData: &ClientData{
+			Host:        "apps.lovense.com",
+			DefaultForm: DefaultForm,
+		},
+		ctx: ctx,
 	}
+}
+
+// WithContext returns a copy of Client with the given context.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	cpy := *c
+	cpy.ctx = ctx
+	return &cpy
 }
 
 // DoGET sends a GET to the given URL.
