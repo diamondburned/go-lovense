@@ -105,7 +105,7 @@ func (r *Reader) ReadHeader() (Header, error) {
 	}
 
 	// Discard the delimiter byte.
-	r.buf.Discard(1)
+	b = bytes.TrimSuffix(b, []byte("#"))
 
 	fields := bytes.Split(b, []byte(";"))
 
