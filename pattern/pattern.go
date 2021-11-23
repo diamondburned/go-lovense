@@ -13,7 +13,7 @@ import (
 // Pattern describes a pattern file.
 type Pattern struct {
 	Header
-	Points [][]Point
+	Points Points
 }
 
 // Parse consumes r fully and returns the Lovense pattern reader and all its
@@ -26,9 +26,21 @@ func Parse(r io.Reader) (*Pattern, error) {
 		return nil, fmt.Errorf("cannot read header: %w", err)
 	}
 
-	p, err := reader.ReadAllPoints()
-	if err != nil {
-		return nil, fmt.Errorf("cannot read all points: %w", err)
+	var p Points
+
+	switch h.Version {
+	case V0:
+		p, err = reader.ReadAllV0Points()
+		if err != nil {
+			return nil, fmt.Errorf("cannot read all v0 points: %w", err)
+		}
+	case V1:
+		p, err = reader.ReadAllV1Points()
+		if err != nil {
+			return nil, fmt.Errorf("cannot read all v1 points: %w", err)
+		}
+	case 2:
+		return nil, fmt.Errorf("unknown version %d", h.Version)
 	}
 
 	if len(p) > 0 && len(p[0]) != len(h.Features) {
@@ -41,10 +53,24 @@ func Parse(r io.Reader) (*Pattern, error) {
 	}, nil
 }
 
+// Version is the version of the pattern.
+type Version int
+
+const (
+	V0 Version = 0
+	V1 Version = 1
+)
+
+// String returns version in "V:n" format.
+func (v Version) String() string {
+	return fmt.Sprintf("V:%d", int(v))
+}
+
 // Header describes the header of a Lovense pattern file. It is everything that
-// sits before a hash symbol (#).
+// sits before a hash symbol (#) in a version 1 pattern file. All header fields
+// are not guaranteed except for Interval.
 type Header struct {
-	Version  int           // V
+	Version  Version       // V
 	Type     string        // T
 	Features []Feature     // F
 	Interval time.Duration // S
@@ -64,38 +90,97 @@ const (
 	Vibrate2 Feature = "v2"
 )
 
-// Point describes a single data point inside a Lovense pattern file. Its range
-// is, in interval notation, [0, 20].
-type Point uint8
+// Strength describes a single strength point inside a Lovense pattern file.
+type Strength uint8
 
-// AsFloat converts the point into a floating-point number of range [0, 1].
-func (pt Point) AsFloat() float64 {
-	return float64(pt) / 20
+// Scale scales the strength to a number within [0.0, 1.0].
+func (s Strength) Scale(v Version) float64 {
+	switch v {
+	case V0:
+		return clampF(float64(s) / 100)
+	case V1:
+		return clampF(float64(s) / 20)
+	default:
+		return 0
+	}
 }
+
+func clampF(f float64) float64 {
+	if f < 0 {
+		return 0
+	}
+	if f > 1 {
+		return 1
+	}
+	return f
+}
+
+// Point describes the strengths of motors in an instant of time, or a point, in
+// a Lovense pattern file. Version 0 pattern files will always only have a
+// single motor, while version 1 pattern files can have more.
+type Point []Strength
+
+// Scale scales the point (list of strengths) into floats within range [0.0,
+// 1.0].
+func (p Point) Scale(v Version) []float64 {
+	return p.ScaleAppend(v, nil)
+}
+
+// ScaleAppend is the append version of Scale.
+func (p Point) ScaleAppend(v Version, buf []float64) []float64 {
+	if cap(buf) < len(p) {
+		buf = make([]float64, 0, len(p))
+	}
+	for _, s := range p {
+		buf = append(buf, s.Scale(v))
+	}
+	return buf
+}
+
+// Points contains a list of points, each containing a list of vibration
+// strength numbers. It holds multiple points representing multiple instants of
+// time incremented by the Interval.
+type Points []Point
 
 // Reader provides a Lovense pattern reader.
 type Reader struct {
 	buf *bufio.Reader
-	pts []Point
 }
-
-const bufferSize = 1 << 9 // 512 bytes
 
 // NewReader creates a new reader from the given io.Reader.
 func NewReader(r io.Reader) *Reader {
 	buffer, ok := r.(*bufio.Reader)
 	if !ok {
-		buffer = bufio.NewReaderSize(r, bufferSize)
+		buffer = bufio.NewReader(r)
 	}
-	return &Reader{buffer, nil}
+	return &Reader{buffer}
+}
+
+var spaces = [255]bool{
+	' ':  true,
+	'\t': true,
+	'\n': true,
+	'\r': true,
 }
 
 // ReadHeader reads the header. Note that the method will consume more bytes
 // from the io.Reader than it needs to, since the reader is buffered.
 func (r *Reader) ReadHeader() (Header, error) {
 	header := Header{
-		Version:  1,
+		Version:  0,
+		Features: []Feature{"v"},
 		Interval: 100 * time.Millisecond,
+	}
+
+	// Peek the next 2 bytes. If it's "V:", then we can read the version.
+	// Otherwise, it's version 0.
+	versionHeader, err := r.buf.Peek(2)
+	if err != nil {
+		return header, fmt.Errorf("cannot peek version: %w", err)
+	}
+
+	if string(versionHeader) != "V:" {
+		return header, nil
 	}
 
 	// This reads maximum r.buf.Size() bytes.
@@ -121,7 +206,7 @@ func (r *Reader) ReadHeader() (Header, error) {
 			if err != nil {
 				return header, fmt.Errorf("invalid version %q: %v", parts[1], err)
 			}
-			header.Version = v
+			header.Version = Version(v)
 		case "T":
 			header.Type = string(parts[1])
 		case "F":
@@ -144,9 +229,46 @@ func (r *Reader) ReadHeader() (Header, error) {
 	return header, nil
 }
 
-// ReadData reads a list of motor data points. The returned list is valid until
-// the next call.
-func (r *Reader) ReadPoints() ([]Point, error) {
+// ReadAllV0Points reads all data points in a version 0 pattern file.
+// Version 0 is not capable of containing data for more than 1 motor, so the
+// length of the inner slice is always 1.
+func (r *Reader) ReadAllV0Points() (Points, error) {
+	var points Points
+
+	// Peak to get the size for preallocating backing. We'll leave getting the
+	// stride to the actual loop.
+	b, err := r.buf.Peek(r.buf.Buffered())
+	if err == nil {
+		n := bytes.Count(b, []byte(",")) + 1
+		points = make(Points, 0, n)
+	}
+
+	for err == nil {
+		b, err = r.buf.ReadSlice(',')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return points, fmt.Errorf("cannot read v0 point: %w", err)
+		}
+
+		b = bytes.TrimSuffix(b, []byte(","))
+		b = bytes.TrimSpace(b)
+
+		if len(b) == 0 {
+			continue
+		}
+
+		p, err := strconv.ParseUint(string(b), 10, 8)
+		if err != nil {
+			return points, fmt.Errorf("error parsing v0 point: %w", err)
+		}
+
+		points = append(points, Point{Strength(p)})
+	}
+
+	return points, nil
+}
+
+// ReadV1Points reads a list of motor data points in a version 1 pattern file.
+func (r *Reader) ReadV1Points() (Point, error) {
 	// TODO: retry until EOF or valid to skip spaces.
 	b, err := r.buf.ReadSlice(';')
 	if err != nil {
@@ -154,32 +276,32 @@ func (r *Reader) ReadPoints() ([]Point, error) {
 	}
 
 	parts := bytes.Split(b, []byte(","))
-	points := make([]Point, len(parts))
+	point := make(Point, len(parts))
 
 	for i, part := range parts {
 		v, err := strconv.Atoi(string(part))
 		if err != nil {
 			return nil, fmt.Errorf("invalid point %q: %v", part, err)
 		}
-		points[i] = Point(v)
+		point[i] = Strength(v)
 	}
 
-	return points, nil
+	return point, nil
 }
 
-// ReadAllData reads all data points. It guarantees that all point pairs in the
-// slice will be equally sized.
-func (r *Reader) ReadAllPoints() ([][]Point, error) {
+// ReadAllV2Data reads all data points in a version 1 pattern file. It
+// guarantees that all point pairs in the slice will be equally sized.
+func (r *Reader) ReadAllV1Points() (Points, error) {
 	// backing slice that contains all points flattened out
-	var backing []Point
+	var backing []Strength
 	stride := -1
 
 	// Peak to get the size for preallocating backing. We'll leave getting the
 	// stride to the actual loop.
 	b, err := r.buf.Peek(r.buf.Buffered())
 	if err == nil {
-		n := bytes.Count(b, []byte(";")) + bytes.Count(b, []byte(","))
-		backing = make([]Point, 0, n)
+		n := bytes.Count(b, []byte(";")) + bytes.Count(b, []byte(",")) + 1
+		backing = make([]Strength, 0, n)
 	}
 
 	for err == nil {
@@ -191,7 +313,7 @@ func (r *Reader) ReadAllPoints() ([][]Point, error) {
 
 		// Trim the trailing semicolon out, since ReadSlice includes it.
 		b = bytes.TrimSuffix(b, []byte(";"))
-		b = bytes.Trim(b, "\n")
+		b = bytes.TrimSpace(b)
 
 		if len(b) == 0 {
 			continue
@@ -211,16 +333,16 @@ func (r *Reader) ReadAllPoints() ([][]Point, error) {
 				return nil, fmt.Errorf("%q doesn't have %d points", b, stride)
 			}
 
-			p, err := strconv.Atoi(string(v))
+			p, err := strconv.ParseUint(string(v), 10, 8)
 			if err != nil {
 				return nil, fmt.Errorf("invalid point: %w", err)
 			}
 
-			backing = append(backing, Point(p))
+			backing = append(backing, Strength(p))
 		}
 	}
 
-	pairs := make([][]Point, 0, len(backing)/stride)
+	pairs := make(Points, 0, len(backing)/stride)
 
 	for head := 0; head < len(backing); {
 		tail := head + stride

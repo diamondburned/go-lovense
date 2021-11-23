@@ -36,7 +36,7 @@ func TestSepReader(t *testing.T) {
 	}
 }
 
-func TestParse(t *testing.T) {
+func TestParseV1(t *testing.T) {
 	f := openFile(t, "testdata/edge")
 	b := bufio.NewReaderSize(f, 38)
 
@@ -49,15 +49,50 @@ func TestParse(t *testing.T) {
 		Header: Header{
 			Version:  1,
 			Type:     "Edge",
-			Features: []Feature{"v1", "v2"},
+			Features: []Feature{Vibrate1, Vibrate2},
 			Interval: 100 * time.Millisecond,
 			MD5Sum:   "deadbeef",
 		},
-		Points: [][]Point{
+		Points: Points{
 			{0, 1}, {1, 0}, {1, 0}, {0, 1}, {20, 0}, {0, 20}, {20, 20}, {0, 0},
 			{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
 			{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
 			{0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+		},
+	}
+
+	if diff := deep.Equal(p, expect); diff != nil {
+		t.Fatalf("unexpected pattern: %s", diff)
+	}
+}
+
+func TestParseV0(t *testing.T) {
+	f := openFile(t, "testdata/v0")
+	b := bufio.NewReaderSize(f, 12)
+
+	p, err := Parse(b)
+	if err != nil {
+		t.Fatal("cannot parse testdata/v0:", err)
+	}
+
+	expect := &Pattern{
+		Header: Header{
+			Version:  0,
+			Type:     "",
+			Features: []Feature{Vibrate},
+			Interval: 100 * time.Millisecond,
+			MD5Sum:   "",
+		},
+		Points: Points{
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+			{0}, {0}, {0}, {0}, {0}, {8}, {8}, {8}, {7}, {7}, {7}, {6},
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0},
+			{0}, {0}, {0}, {0}, {0}, {0}, {0}, {3}, {3}, {4}, {4}, {3},
 		},
 	}
 

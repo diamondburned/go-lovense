@@ -31,6 +31,9 @@ func TestPatternClient(t *testing.T) {
 
 func testLogPatterns(t *testing.T, patterns []Pattern) {
 	for i, pattern := range patterns {
-		t.Logf("%02d: %s by %s", i+1, pattern.DecodedName(), pattern.AuthorOrAnon())
+		t.Logf(
+			"%02d: %s (%q, v%d) by %s",
+			i+1, pattern.DecodedName(), pattern.ToyTag, pattern.Version2, pattern.AuthorOrAnon(),
+		)
 	}
 }
