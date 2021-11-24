@@ -90,6 +90,24 @@ const (
 	Vibrate2 Feature = "v2"
 )
 
+// String formats the feature as human-readable strings.
+func (f Feature) String() string {
+	switch f {
+	case AirPump:
+		return "air pump"
+	case Rotate:
+		return "rotate"
+	case Vibrate:
+		return "vibrator"
+	case Vibrate1:
+		return "vibrator 1"
+	case Vibrate2:
+		return "vibrator 2"
+	default:
+		return fmt.Sprintf("Feature(%q)", string(f))
+	}
+}
+
 // Strength describes a single strength point inside a Lovense pattern file.
 type Strength uint8
 
