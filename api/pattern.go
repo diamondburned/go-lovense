@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/diamondburned/go-lovense/pattern"
 )
@@ -56,11 +57,21 @@ func (p *Pattern) DecodedName() string {
 }
 
 // AuthorOrAnon returns the Author name or Anonymous if empty.
-func (b *Pattern) AuthorOrAnon() string {
-	if b.Author != "" {
-		return b.Author
+func (p *Pattern) AuthorOrAnon() string {
+	if p.Author != "" {
+		return p.Author
 	}
 	return "Anonymous"
+}
+
+// Features reads p.ToyTag and parses them into a list of features.
+func (p *Pattern) Features() []pattern.Feature {
+	t := strings.Split(p.ToyTag, ",")
+	f := make([]pattern.Feature, len(t))
+	for i, t := range t {
+		f[i] = pattern.Feature(t)
+	}
+	return f
 }
 
 // PatternFindType
